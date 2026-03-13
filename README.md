@@ -72,12 +72,13 @@ python ollama_manager.py
 
 ---
 
+
 ## 🏗️ System Design
-
-![System Design](system_design_page-0001.jpg)
-
+ 
+![System Design](./system_design_page-0001.jpg)
+ 
 Worker threads handle all long-running operations (install, model pull, chat streaming) so the UI never freezes. The model list is filtered at runtime based on your system's available RAM. The built-in API server proxies requests to Ollama with CORS support and SSE streaming.
-
+ 
 ---
 
 ## 📡 API Usage
