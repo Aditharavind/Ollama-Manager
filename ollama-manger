@@ -1,0 +1,680 @@
+import sys
+import os
+import json
+import socket
+import subprocess
+import threading
+import platform
+import psutil
+import requests
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from PyQt5.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QPushButton, QLabel, QComboBox, QTextEdit, QLineEdit,
+    QTabWidget, QFrame, QProgressBar, QScrollArea, QGridLayout,
+    QCheckBox, QSpinBox, QGroupBox
+)
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt5.QtGui import QFont, QTextCursor
+
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+def get_lan_ip():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]; s.close(); return ip
+    except:
+        return "127.0.0.1"
+
+LAN_IP = get_lan_ip()
+
+# ─── Stylesheet ───────────────────────────────────────────────────────────────
+STYLESHEET = """
+QMainWindow, QWidget { background-color: #0d0f14; color: #e2e8f0; font-family: 'Courier New', monospace; }
+QTabWidget::pane { border: 1px solid #1e2535; background: #0d0f14; border-radius: 8px; }
+QTabBar::tab { background: #141720; color: #64748b; padding: 10px 22px; border: none; font-size: 12px; font-family: 'Courier New', monospace; letter-spacing: 1px; }
+QTabBar::tab:selected { background: #1a2332; color: #38bdf8; border-bottom: 2px solid #38bdf8; }
+QTabBar::tab:hover { background: #1a2332; color: #94a3b8; }
+QPushButton { background: #1a2332; color: #38bdf8; border: 1px solid #1e3a5f; border-radius: 6px; padding: 8px 18px; font-family: 'Courier New', monospace; font-size: 12px; letter-spacing: 1px; }
+QPushButton:hover { background: #1e3a5f; border-color: #38bdf8; color: #7dd3fc; }
+QPushButton:pressed { background: #0c4a6e; }
+QPushButton:disabled { background: #141720; color: #374151; border-color: #1f2937; }
+QPushButton#btn_primary { background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #0369a1,stop:1 #0284c7); color:#fff; font-weight:bold; border:none; padding:10px 24px; }
+QPushButton#btn_primary:hover { background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #0284c7,stop:1 #38bdf8); }
+QPushButton#btn_danger { background: #1a0a0a; color: #f87171; border-color: #7f1d1d; }
+QPushButton#btn_danger:hover { background: #7f1d1d; color: #fca5a5; }
+QPushButton#btn_success { background: #052e16; color: #4ade80; border-color: #14532d; }
+QPushButton#btn_success:hover { background: #14532d; }
+QPushButton#btn_warn { background: #1a1200; color: #fbbf24; border-color: #92400e; }
+QLineEdit, QTextEdit, QComboBox { background: #141720; color: #e2e8f0; border: 1px solid #1e2535; border-radius: 6px; padding: 8px 12px; font-family: 'Courier New', monospace; font-size: 13px; selection-background-color: #1e3a5f; }
+QLineEdit:focus, QTextEdit:focus { border-color: #38bdf8; background: #141f2e; }
+QComboBox::drop-down { border: none; padding-right: 8px; }
+QComboBox QAbstractItemView { background: #141720; border: 1px solid #1e3a5f; color: #e2e8f0; selection-background-color: #1e3a5f; }
+QProgressBar { background: #141720; border: 1px solid #1e2535; border-radius: 4px; height: 6px; }
+QProgressBar::chunk { background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #0369a1,stop:1 #38bdf8); border-radius: 4px; }
+QScrollArea { border: none; background: transparent; }
+QScrollBar:vertical { background: #0d0f14; width: 8px; border-radius: 4px; }
+QScrollBar::handle:vertical { background: #1e3a5f; border-radius: 4px; min-height: 30px; }
+QScrollBar::handle:vertical:hover { background: #38bdf8; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+QGroupBox { border: 1px solid #1e2535; border-radius: 8px; margin-top: 14px; padding-top: 6px; font-family: 'Courier New', monospace; font-size: 11px; color: #64748b; letter-spacing: 1px; }
+QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; color: #38bdf8; }
+QLabel#heading { font-size: 18px; font-weight: bold; color: #f8fafc; letter-spacing: 2px; }
+QLabel#subheading { font-size: 11px; color: #475569; letter-spacing: 3px; }
+QLabel#mono_tag { background: #0c1a2e; color: #38bdf8; border: 1px solid #1e3a5f; border-radius: 4px; padding: 2px 8px; font-size: 11px; }
+QFrame#card { background: #141720; border: 1px solid #1e2535; border-radius: 10px; }
+QFrame#separator { background: #1e2535; max-height: 1px; min-height: 1px; }
+QCheckBox { color: #94a3b8; font-family: 'Courier New', monospace; spacing: 8px; }
+QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid #1e3a5f; border-radius: 3px; background: #141720; }
+QCheckBox::indicator:checked { background: #0369a1; border-color: #38bdf8; }
+QSpinBox { background: #141720; color: #e2e8f0; border: 1px solid #1e2535; border-radius: 6px; padding: 6px 10px; font-family: 'Courier New', monospace; }
+"""
+
+# ─── Model Catalog ────────────────────────────────────────────────────────────
+MODEL_CATALOG = [
+    {"name":"tinyllama",       "size_gb":0.6,  "ram_gb":2,  "desc":"Tiny & fast. Great for testing.",      "tags":["lightweight","fast"]},
+    {"name":"phi3:mini",       "size_gb":2.3,  "ram_gb":4,  "desc":"Microsoft Phi-3 Mini. Smart & small.", "tags":["efficient","smart"]},
+    {"name":"llama3.2:1b",     "size_gb":1.3,  "ram_gb":3,  "desc":"Meta Llama 3.2 1B.",                   "tags":["meta","latest"]},
+    {"name":"llama3.2:3b",     "size_gb":2.0,  "ram_gb":5,  "desc":"Meta Llama 3.2 3B. Balanced.",        "tags":["meta","balanced"]},
+    {"name":"mistral",         "size_gb":4.1,  "ram_gb":8,  "desc":"Mistral 7B. Excellent quality.",       "tags":["recommended","7b"]},
+    {"name":"llama3.1:8b",     "size_gb":4.7,  "ram_gb":8,  "desc":"Meta Llama 3.1 8B.",                   "tags":["meta","8b"]},
+    {"name":"gemma2:9b",       "size_gb":5.4,  "ram_gb":10, "desc":"Google Gemma 2 9B.",                   "tags":["google","9b"]},
+    {"name":"qwen2.5:7b",      "size_gb":4.4,  "ram_gb":8,  "desc":"Alibaba Qwen 2.5 7B.",                 "tags":["qwen","7b"]},
+    {"name":"deepseek-r1:7b",  "size_gb":4.7,  "ram_gb":8,  "desc":"DeepSeek R1 reasoning model.",        "tags":["reasoning","7b"]},
+    {"name":"codellama:7b",    "size_gb":3.8,  "ram_gb":8,  "desc":"Code-focused Llama 7B.",               "tags":["coding","7b"]},
+    {"name":"llama3.1:70b",    "size_gb":40.0, "ram_gb":48, "desc":"Llama 3.1 70B. Top quality.",         "tags":["large","70b"]},
+    {"name":"mixtral:8x7b",    "size_gb":26.0, "ram_gb":32, "desc":"Mistral MoE. Very capable.",          "tags":["moe","large"]},
+    {"name":"nomic-embed-text","size_gb":0.3,  "ram_gb":1,  "desc":"Text embeddings model.",              "tags":["embedding"]},
+]
+
+# ─── Threads ──────────────────────────────────────────────────────────────────
+class InstallOllamaThread(QThread):
+    log  = pyqtSignal(str)
+    done = pyqtSignal(bool)
+    def run(self):
+        self.log.emit("[INFO] Running: curl -fsSL https://ollama.com/install.sh | sh")
+        try:
+            proc = subprocess.Popen("curl -fsSL https://ollama.com/install.sh | sh",
+                shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            for line in proc.stdout:
+                self.log.emit(line.rstrip())
+            proc.wait(); self.done.emit(proc.returncode == 0)
+        except Exception as e:
+            self.log.emit(f"[ERR] {e}"); self.done.emit(False)
+
+
+class PullModelThread(QThread):
+    log      = pyqtSignal(str)
+    progress = pyqtSignal(int)
+    done     = pyqtSignal(bool, str)
+    def __init__(self, name):
+        super().__init__(); self.name = name
+    def run(self):
+        self.log.emit(f"[PULL] ollama pull {self.name}")
+        try:
+            proc = subprocess.Popen(["ollama","pull",self.name],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+            for line in proc.stdout:
+                line = line.rstrip()
+                if line: self.log.emit(line)
+                if "%" in line:
+                    try: self.progress.emit(min(int(line.split("%")[0].split()[-1]),100))
+                    except: pass
+            proc.wait(); self.done.emit(proc.returncode == 0, self.name)
+        except Exception as e:
+            self.log.emit(f"[ERR] {e}"); self.done.emit(False, self.name)
+
+
+class StreamChatThread(QThread):
+    token = pyqtSignal(str)
+    done  = pyqtSignal()
+    error = pyqtSignal(str)
+    def __init__(self, model, messages):
+        super().__init__(); self.model = model; self.messages = messages
+    def run(self):
+        try:
+            resp = requests.post("http://localhost:11434/api/chat",
+                json={"model":self.model,"messages":self.messages,"stream":True},
+                stream=True, timeout=180)
+            resp.raise_for_status()
+            for raw in resp.iter_lines():
+                if not raw: continue
+                try: data = json.loads(raw)
+                except: continue
+                c = data.get("message",{}).get("content","")
+                if c: self.token.emit(c)
+                if data.get("done"): break
+            self.done.emit()
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+# ─── API Handler (LAN + Streaming SSE) ───────────────────────────────────────
+class OllamaAPIHandler(BaseHTTPRequestHandler):
+    current_model  = "mistral"
+    request_log_cb = None
+
+    def log_message(self, fmt, *args):
+        if OllamaAPIHandler.request_log_cb:
+            OllamaAPIHandler.request_log_cb(
+                f'<span style="color:#64748b;">[{self.address_string()}]</span> '
+                f'<span style="color:#94a3b8;">{fmt % args}</span>')
+
+    def _cors(self):
+        self.send_header("Access-Control-Allow-Origin","*")
+        self.send_header("Access-Control-Allow-Methods","GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers","Content-Type, Authorization")
+
+    def do_OPTIONS(self):
+        self.send_response(200); self._cors(); self.end_headers()
+
+    def do_GET(self):
+        if self.path in ("/api/models","/api/tags"):
+            try:
+                r = requests.get("http://localhost:11434/api/tags",timeout=5)
+                models = [m["name"] for m in r.json().get("models",[])]
+            except: models = []
+            body = json.dumps({"models":models}).encode()
+            self.send_response(200); self.send_header("Content-Type","application/json")
+            self._cors(); self.end_headers(); self.wfile.write(body)
+        elif self.path == "/health":
+            body = json.dumps({"status":"ok","model":OllamaAPIHandler.current_model}).encode()
+            self.send_response(200); self.send_header("Content-Type","application/json")
+            self._cors(); self.end_headers(); self.wfile.write(body)
+        else:
+            self.send_response(404); self._cors(); self.end_headers()
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length",0))
+        try: data = json.loads(self.rfile.read(length))
+        except:
+            self.send_response(400); self.end_headers(); return
+
+        model  = data.get("model", OllamaAPIHandler.current_model)
+        stream = data.get("stream", False)
+        if "messages" in data:
+            messages = data["messages"]
+            prompt   = messages[-1].get("content","") if messages else ""
+        else:
+            prompt   = data.get("prompt","")
+            messages = [{"role":"user","content":prompt}]
+
+        if self.path in ("/api/chat","/api/generate","/v1/chat/completions"):
+            if stream: self._stream(model, messages)
+            else:      self._blocking(model, prompt)
+        else:
+            self.send_response(404); self._cors(); self.end_headers()
+
+    def _blocking(self, model, prompt):
+        try:
+            r = requests.post("http://localhost:11434/api/generate",
+                json={"model":model,"prompt":prompt,"stream":False}, timeout=180)
+            body = json.dumps({"response":r.json().get("response",""),"model":model,"done":True}).encode()
+            self.send_response(200); self.send_header("Content-Type","application/json")
+            self._cors(); self.end_headers(); self.wfile.write(body)
+        except Exception as e:
+            self.send_response(500); self._cors(); self.end_headers()
+            self.wfile.write(json.dumps({"error":str(e)}).encode())
+
+    def _stream(self, model, messages):
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type","text/event-stream")
+            self.send_header("Cache-Control","no-cache")
+            self.send_header("X-Accel-Buffering","no")
+            self._cors(); self.end_headers()
+            r = requests.post("http://localhost:11434/api/chat",
+                json={"model":model,"messages":messages,"stream":True},
+                stream=True, timeout=180)
+            for raw in r.iter_lines():
+                if not raw: continue
+                try: chunk = json.loads(raw)
+                except: continue
+                c = chunk.get("message",{}).get("content","")
+                if c:
+                    payload = json.dumps({"response":c,"model":model,"done":False})
+                    self.wfile.write(f"data: {payload}\n\n".encode()); self.wfile.flush()
+                if chunk.get("done"):
+                    self.wfile.write(b"data: [DONE]\n\n"); self.wfile.flush(); break
+        except Exception as e:
+            try: self.wfile.write(f'data: {{"error":"{e}"}}\n\n'.encode()); self.wfile.flush()
+            except: pass
+
+
+# ─── Main Window ──────────────────────────────────────────────────────────────
+class OllamaManager(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("OLLAMA  MANAGER")
+        self.setMinimumSize(1120, 800)
+        self.api_server     = None
+        self.chat_history   = []
+        self.installed_models = []
+        self.pull_threads   = {}
+        self._current_response = ""
+        self._build_ui()
+        OllamaAPIHandler.request_log_cb = self._api_log
+        QTimer.singleShot(500, self.check_ollama)
+
+    def _ts(self):
+        from datetime import datetime
+        return datetime.now().strftime("%H:%M:%S")
+
+    # ── UI ────────────────────────────────────────────────────────────────────
+    def _build_ui(self):
+        central = QWidget(); self.setCentralWidget(central)
+        root = QVBoxLayout(central); root.setContentsMargins(20,16,20,16); root.setSpacing(12)
+
+        hdr = QHBoxLayout()
+        left = QVBoxLayout(); left.setSpacing(2)
+        t = QLabel("⬡  OLLAMA  MANAGER"); t.setObjectName("heading")
+        s = QLabel(f"LOCAL  AI  ·  SELF-HOSTED  ·  LAN  {LAN_IP}"); s.setObjectName("subheading")
+        left.addWidget(t); left.addWidget(s)
+
+        self.status_badge = QLabel("● CHECKING...")
+        self.status_badge.setStyleSheet("color:#fbbf24; font-family:'Courier New'; font-size:12px;")
+        ram = psutil.virtual_memory()
+        sys_lbl = QLabel(f"RAM  {ram.available/(1024**3):.1f} / {ram.total/(1024**3):.1f} GB  ·  {platform.system()}")
+        sys_lbl.setObjectName("subheading"); sys_lbl.setAlignment(Qt.AlignRight)
+
+        right = QVBoxLayout(); right.setAlignment(Qt.AlignRight)
+        right.addWidget(self.status_badge); right.addWidget(sys_lbl)
+        hdr.addLayout(left); hdr.addStretch(); hdr.addLayout(right)
+        root.addLayout(hdr)
+
+        sep = QFrame(); sep.setObjectName("separator"); root.addWidget(sep)
+
+        self.tabs = QTabWidget(); root.addWidget(self.tabs)
+        self.tabs.addTab(self._tab_setup(),  "01  SETUP")
+        self.tabs.addTab(self._tab_models(), "02  MODELS")
+        self.tabs.addTab(self._tab_chat(),   "03  CHAT")
+        self.tabs.addTab(self._tab_api(),    "04  API  SERVER")
+
+    # ── Tab 1: Setup ──────────────────────────────────────────────────────────
+    def _tab_setup(self):
+        w = QWidget(); lay = QVBoxLayout(w); lay.setContentsMargins(16,16,16,16); lay.setSpacing(12)
+
+        card = QFrame(); card.setObjectName("card")
+        cl = QVBoxLayout(card); cl.setContentsMargins(16,14,16,14); cl.setSpacing(8)
+        row = QHBoxLayout()
+        lbl = QLabel("OLLAMA  STATUS"); lbl.setObjectName("subheading")
+        self.ollama_status_lbl = QLabel("Checking..."); self.ollama_status_lbl.setStyleSheet("color:#fbbf24;")
+        row.addWidget(lbl); row.addStretch(); row.addWidget(self.ollama_status_lbl); cl.addLayout(row)
+        self.version_lbl = QLabel("Version: —"); self.version_lbl.setStyleSheet("color:#475569; font-size:12px;")
+        cl.addWidget(self.version_lbl)
+        br = QHBoxLayout()
+        self.btn_check = QPushButton("↺  RECHECK"); self.btn_check.clicked.connect(self.check_ollama)
+        self.btn_install = QPushButton("⬇  INSTALL  OLLAMA"); self.btn_install.setObjectName("btn_primary")
+        self.btn_install.setEnabled(False); self.btn_install.clicked.connect(self.install_ollama)
+        br.addWidget(self.btn_check); br.addWidget(self.btn_install); br.addStretch()
+        cl.addLayout(br); lay.addWidget(card)
+
+        lbl2 = QLabel("INSTALL  LOG"); lbl2.setObjectName("subheading"); lay.addWidget(lbl2)
+        self.setup_log = QTextEdit(); self.setup_log.setReadOnly(True)
+        self.setup_log.setFont(QFont("Courier New",11))
+        self.setup_log.setStyleSheet("background:#0a0c10; border:1px solid #1e2535; border-radius:8px; padding:10px;")
+        lay.addWidget(self.setup_log)
+        self.install_progress = QProgressBar(); self.install_progress.setRange(0,0); self.install_progress.setVisible(False)
+        lay.addWidget(self.install_progress)
+        return w
+
+    # ── Tab 2: Models ─────────────────────────────────────────────────────────
+    def _tab_models(self):
+        w = QWidget(); lay = QVBoxLayout(w); lay.setContentsMargins(16,16,16,16); lay.setSpacing(10)
+        ram_gb = psutil.virtual_memory().total/(1024**3)
+        lay.addWidget(self._sublabel(f"System RAM: {ram_gb:.1f} GB  ·  Compatible models shown below"))
+
+        # ── Custom model pull ──────────────────────────────────────────────
+        grp = QGroupBox("PULL  CUSTOM  /  UNLISTED  MODEL")
+        gl = QHBoxLayout(grp); gl.setSpacing(8)
+        self.custom_model_input = QLineEdit()
+        self.custom_model_input.setPlaceholderText("e.g.  llava:13b   dolphin-mistral   starcoder2:7b   (any name from ollama.com/library)")
+        self.custom_model_input.returnPressed.connect(self.pull_custom_model)
+        self.btn_pull_custom = QPushButton("⬇  PULL"); self.btn_pull_custom.setObjectName("btn_primary")
+        self.btn_pull_custom.setFixedWidth(90); self.btn_pull_custom.clicked.connect(self.pull_custom_model)
+        hint = QLabel("ollama.com/library"); hint.setObjectName("mono_tag")
+        gl.addWidget(self.custom_model_input); gl.addWidget(self.btn_pull_custom); gl.addWidget(hint)
+        lay.addWidget(grp)
+
+        # Filter bar
+        fr = QHBoxLayout()
+        self.filter_box = QLineEdit(); self.filter_box.setPlaceholderText("Filter catalog...")
+        self.filter_box.textChanged.connect(self._populate_model_cards)
+        self.show_all_cb = QCheckBox("Show all (including large models)")
+        self.show_all_cb.stateChanged.connect(self._populate_model_cards)
+        fr.addWidget(self.filter_box); fr.addWidget(self.show_all_cb); lay.addLayout(fr)
+
+        scroll = QScrollArea(); scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.model_cards_widget = QWidget()
+        self.model_cards_layout = QGridLayout(self.model_cards_widget); self.model_cards_layout.setSpacing(10)
+        scroll.setWidget(self.model_cards_widget); lay.addWidget(scroll)
+
+        lay.addWidget(self._sublabel("PULL  LOG"))
+        self.pull_log = QTextEdit(); self.pull_log.setReadOnly(True); self.pull_log.setMaximumHeight(110)
+        self.pull_log.setFont(QFont("Courier New",10))
+        self.pull_log.setStyleSheet("background:#0a0c10; border:1px solid #1e2535; border-radius:6px; padding:8px;")
+        lay.addWidget(self.pull_log)
+        self.pull_progress = QProgressBar(); self.pull_progress.setVisible(False); lay.addWidget(self.pull_progress)
+
+        QTimer.singleShot(900, self._populate_model_cards)
+        return w
+
+    def _sublabel(self, txt):
+        l = QLabel(txt); l.setObjectName("subheading"); return l
+
+    def _populate_model_cards(self):
+        for i in reversed(range(self.model_cards_layout.count())):
+            wi = self.model_cards_layout.itemAt(i).widget()
+            if wi: wi.deleteLater()
+
+        ram_gb   = psutil.virtual_memory().total/(1024**3)
+        q        = self.filter_box.text().lower() if hasattr(self,"filter_box") else ""
+        show_all = self.show_all_cb.isChecked() if hasattr(self,"show_all_cb") else False
+        col = row = 0
+
+        for m in MODEL_CATALOG:
+            if q and q not in m["name"].lower() and q not in m["desc"].lower(): continue
+            if not show_all and m["ram_gb"] > ram_gb*0.85: continue
+            self.model_cards_layout.addWidget(self._make_model_card(m, ram_gb), row, col)
+            col += 1
+            if col == 2: col = 0; row += 1
+
+        if self.model_cards_layout.count() == 0:
+            lbl = QLabel("No models match — try 'Show all' or clear filter.")
+            lbl.setAlignment(Qt.AlignCenter); lbl.setStyleSheet("color:#475569; padding:30px;")
+            self.model_cards_layout.addWidget(lbl,0,0)
+
+    def _make_model_card(self, m, ram_gb):
+        card = QFrame(); card.setObjectName("card"); card.setFixedHeight(165)
+        lay = QVBoxLayout(card); lay.setContentsMargins(14,12,14,12); lay.setSpacing(6)
+
+        top = QHBoxLayout()
+        n = QLabel(m["name"]); n.setFont(QFont("Courier New",13,QFont.Bold)); n.setStyleSheet("color:#f1f5f9;")
+        installed = m["name"] in self.installed_models
+        st = QLabel("● INSTALLED" if installed else f"{m['size_gb']} GB")
+        st.setStyleSheet("color:#4ade80; font-size:11px;" if installed else "color:#64748b; font-size:11px;")
+        top.addWidget(n); top.addStretch(); top.addWidget(st); lay.addLayout(top)
+
+        desc = QLabel(m["desc"]); desc.setStyleSheet("color:#64748b; font-size:11px;"); desc.setWordWrap(True)
+        lay.addWidget(desc)
+
+        tr = QHBoxLayout(); tr.setSpacing(4)
+        for tag in m["tags"][:3]: t2 = QLabel(tag); t2.setObjectName("mono_tag"); tr.addWidget(t2)
+        tr.addStretch(); lay.addLayout(tr)
+
+        ram_ok = m["ram_gb"] <= ram_gb*0.85
+        if installed:
+            btn = QPushButton("● INSTALLED"); btn.setObjectName("btn_success"); btn.setEnabled(False)
+        elif ram_ok:
+            btn = QPushButton("⬇  PULL  MODEL"); btn.setObjectName("btn_primary")
+            btn.clicked.connect(lambda _, nm=m["name"]: self.pull_model(nm))
+        else:
+            btn = QPushButton(f"⚠  NEEDS  {m['ram_gb']} GB  RAM"); btn.setObjectName("btn_warn"); btn.setEnabled(False)
+        lay.addWidget(btn)
+        return card
+
+    # ── Tab 3: Chat ───────────────────────────────────────────────────────────
+    def _tab_chat(self):
+        w = QWidget(); lay = QVBoxLayout(w); lay.setContentsMargins(16,16,16,16); lay.setSpacing(10)
+
+        top = QHBoxLayout()
+        top.addWidget(self._sublabel("MODEL"))
+        self.chat_model_combo = QComboBox(); self.chat_model_combo.setMinimumWidth(220)
+        self.btn_refresh_models = QPushButton("↺"); self.btn_refresh_models.setFixedWidth(36)
+        self.btn_refresh_models.clicked.connect(self.refresh_installed_models)
+        self.stream_cb = QCheckBox("Stream tokens"); self.stream_cb.setChecked(True)
+        self.stream_cb.setStyleSheet("color:#64748b; font-size:11px;")
+        self.btn_clear_chat = QPushButton("✕  CLEAR"); self.btn_clear_chat.setObjectName("btn_danger")
+        self.btn_clear_chat.clicked.connect(self.clear_chat)
+        top.addWidget(self.chat_model_combo); top.addWidget(self.btn_refresh_models)
+        top.addWidget(self.stream_cb); top.addStretch(); top.addWidget(self.btn_clear_chat)
+        lay.addLayout(top)
+
+        self.chat_display = QTextEdit(); self.chat_display.setReadOnly(True)
+        self.chat_display.setFont(QFont("Courier New",12))
+        self.chat_display.setStyleSheet("background:#0a0c10; border:1px solid #1e2535; border-radius:8px; padding:12px;")
+        lay.addWidget(self.chat_display)
+
+        ir = QHBoxLayout()
+        self.chat_input = QLineEdit(); self.chat_input.setPlaceholderText("Type your message and press Enter…")
+        self.chat_input.setFont(QFont("Courier New",12)); self.chat_input.returnPressed.connect(self.send_chat)
+        self.btn_send = QPushButton("SEND  →"); self.btn_send.setObjectName("btn_primary")
+        self.btn_send.setFixedWidth(110); self.btn_send.clicked.connect(self.send_chat)
+        ir.addWidget(self.chat_input); ir.addWidget(self.btn_send); lay.addLayout(ir)
+
+        self.chat_status = QLabel("Select a model and start chatting.")
+        self.chat_status.setObjectName("subheading"); lay.addWidget(self.chat_status)
+        return w
+
+    # ── Tab 4: API ────────────────────────────────────────────────────────────
+    def _tab_api(self):
+        w = QWidget(); lay = QVBoxLayout(w); lay.setContentsMargins(16,16,16,16); lay.setSpacing(12)
+
+        card = QFrame(); card.setObjectName("card")
+        cl = QVBoxLayout(card); cl.setContentsMargins(16,14,16,14); cl.setSpacing(10)
+
+        r1 = QHBoxLayout()
+        r1.addWidget(self._sublabel("API  SERVER"))
+        self.api_status_lbl = QLabel("● STOPPED")
+        self.api_status_lbl.setStyleSheet("color:#f87171; font-family:'Courier New'; font-size:12px;")
+        r1.addStretch(); r1.addWidget(self.api_status_lbl); cl.addLayout(r1)
+
+        # LAN address display
+        self.lan_url_lbl = QLabel(f"LAN  →  http://{LAN_IP}:8600")
+        self.lan_url_lbl.setStyleSheet("color:#38bdf8; font-family:'Courier New'; font-size:14px; font-weight:bold; letter-spacing:1px;")
+        cl.addWidget(self.lan_url_lbl)
+
+        pr = QHBoxLayout()
+        pr.addWidget(QLabel("Port:"))
+        self.port_spin = QSpinBox(); self.port_spin.setRange(1024,65535); self.port_spin.setValue(8600); self.port_spin.setFixedWidth(90)
+        self.port_spin.valueChanged.connect(self._refresh_docs)
+        pr.addWidget(self.port_spin); pr.addStretch(); cl.addLayout(pr)
+
+        mr = QHBoxLayout()
+        mr.addWidget(QLabel("Default model:"))
+        self.api_model_combo = QComboBox(); self.api_model_combo.setMinimumWidth(200)
+        self.api_model_combo.currentTextChanged.connect(lambda t: setattr(OllamaAPIHandler,"current_model",t))
+        mr.addWidget(self.api_model_combo); mr.addStretch(); cl.addLayout(mr)
+
+        stream_note = QLabel("✓  Streaming SSE supported  ·  set  \"stream\": true  in request body")
+        stream_note.setStyleSheet("color:#4ade80; font-size:11px;"); cl.addWidget(stream_note)
+
+        br = QHBoxLayout()
+        self.btn_start_api = QPushButton("▶  START  API  SERVER"); self.btn_start_api.setObjectName("btn_primary")
+        self.btn_start_api.clicked.connect(self.start_api_server)
+        self.btn_stop_api = QPushButton("■  STOP"); self.btn_stop_api.setObjectName("btn_danger")
+        self.btn_stop_api.clicked.connect(self.stop_api_server); self.btn_stop_api.setEnabled(False)
+        br.addWidget(self.btn_start_api); br.addWidget(self.btn_stop_api); br.addStretch()
+        cl.addLayout(br); lay.addWidget(card)
+
+        lay.addWidget(self._sublabel("ENDPOINTS"))
+        self.docs_box = QTextEdit(); self.docs_box.setReadOnly(True)
+        self.docs_box.setFont(QFont("Courier New",11))
+        self.docs_box.setStyleSheet("background:#0a0c10; border:1px solid #1e2535; border-radius:8px; padding:12px; color:#94a3b8;")
+        self.docs_box.setMaximumHeight(215)
+        self._refresh_docs()
+        lay.addWidget(self.docs_box)
+
+        lay.addWidget(self._sublabel("REQUEST  LOG"))
+        self.api_log_box = QTextEdit(); self.api_log_box.setReadOnly(True)
+        self.api_log_box.setFont(QFont("Courier New",11))
+        self.api_log_box.setStyleSheet("background:#0a0c10; border:1px solid #1e2535; border-radius:8px; padding:10px;")
+        lay.addWidget(self.api_log_box)
+        return w
+
+    def _refresh_docs(self):
+        port = self.port_spin.value() if hasattr(self,"port_spin") else 8600
+        self.lan_url_lbl.setText(f"LAN  →  http://{LAN_IP}:{port}")
+        self.docs_box.setPlainText(
+            f"# Anyone on your network can reach this server\n"
+            f"BASE  http://{LAN_IP}:{port}\n\n"
+            f"GET   /api/models        → list installed models\n"
+            f"GET   /health            → server health\n"
+            f"POST  /api/chat          → generate (blocking or stream)\n"
+            f"POST  /api/generate      → alias for /api/chat\n\n"
+            f"─── Blocking ──────────────────────────────────────────────\n"
+            f'curl -X POST http://{LAN_IP}:{port}/api/chat \\\n'
+            f'  -H "Content-Type: application/json" \\\n'
+            f'  -d \'{{"model":"mistral","prompt":"Hello!"}}\'\n\n'
+            f"─── Streaming (SSE) ───────────────────────────────────────\n"
+            f'curl -X POST http://{LAN_IP}:{port}/api/chat \\\n'
+            f'  -H "Content-Type: application/json" \\\n'
+            f'  -d \'{{"model":"mistral","prompt":"Hello!","stream":true}}\'\n'
+            f"  # Each chunk: data: {{\"response\":\"...\",\"done\":false}}\n"
+            f"  # Final line: data: [DONE]"
+        )
+
+    # ── Logic: Ollama ─────────────────────────────────────────────────────────
+    def check_ollama(self):
+        self.ollama_status_lbl.setText("Checking..."); self.ollama_status_lbl.setStyleSheet("color:#fbbf24;")
+        self.status_badge.setText("● CHECKING..."); self.status_badge.setStyleSheet("color:#fbbf24; font-family:'Courier New'; font-size:12px;")
+        try:
+            r = subprocess.run(["ollama","--version"], capture_output=True, text=True, timeout=5)
+            ver = r.stdout.strip() or "installed"
+            self.ollama_status_lbl.setText("● INSTALLED"); self.ollama_status_lbl.setStyleSheet("color:#4ade80;")
+            self.status_badge.setText("● OLLAMA  READY"); self.status_badge.setStyleSheet("color:#4ade80; font-family:'Courier New'; font-size:12px;")
+            self.version_lbl.setText(f"Version: {ver}")
+            self.btn_install.setEnabled(False); self.btn_install.setText("✓  INSTALLED")
+            self._log_setup(f"[OK] {ver}"); self.refresh_installed_models()
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            self.ollama_status_lbl.setText("● NOT FOUND"); self.ollama_status_lbl.setStyleSheet("color:#f87171;")
+            self.status_badge.setText("● NOT FOUND"); self.status_badge.setStyleSheet("color:#f87171; font-family:'Courier New'; font-size:12px;")
+            self.version_lbl.setText("Version: —"); self.btn_install.setEnabled(True)
+            self._log_setup("[WARN] Ollama not found. Click INSTALL OLLAMA.")
+
+    def install_ollama(self):
+        self.btn_install.setEnabled(False); self.install_progress.setVisible(True)
+        self.install_thread = InstallOllamaThread()
+        self.install_thread.log.connect(self._log_setup)
+        self.install_thread.done.connect(self._install_done); self.install_thread.start()
+
+    def _install_done(self, ok):
+        self.install_progress.setVisible(False)
+        if ok: self.check_ollama()
+        else: self.btn_install.setEnabled(True)
+
+    def _log_setup(self, msg):
+        self.setup_log.append(f'<span style="color:#475569;">[{self._ts()}]</span> <span style="color:#94a3b8;">{msg}</span>')
+        self.setup_log.moveCursor(QTextCursor.End)
+
+    # ── Logic: Models ─────────────────────────────────────────────────────────
+    def refresh_installed_models(self):
+        try:
+            r = subprocess.run(["ollama","list"], capture_output=True, text=True, timeout=5)
+            lines = r.stdout.strip().split("\n")[1:]
+            self.installed_models = [l.split()[0] for l in lines if l.strip()]
+        except: self.installed_models = []
+
+        for cb in (self.chat_model_combo, self.api_model_combo):
+            cb.clear()
+            for m in self.installed_models: cb.addItem(m)
+        self._populate_model_cards()
+
+    def pull_model(self, name):
+        name = name.strip()
+        if not name: return
+        self.pull_log.append(f'<span style="color:#38bdf8;">[PULL]</span> Queuing: <b>{name}</b>')
+        self.pull_progress.setVisible(True); self.pull_progress.setValue(0)
+        t = PullModelThread(name)
+        t.log.connect(lambda msg: self.pull_log.append(f'<span style="color:#475569;">{msg}</span>'))
+        t.progress.connect(self.pull_progress.setValue)
+        t.done.connect(self._pull_done); t.start()
+        self.pull_threads[name] = t
+
+    def pull_custom_model(self):
+        name = self.custom_model_input.text().strip()
+        if not name:
+            self.pull_log.append('<span style="color:#f87171;">[ERR] Enter a model name first.</span>'); return
+        self.custom_model_input.clear()
+        self.tabs.setCurrentIndex(1)
+        self.pull_model(name)
+
+    def _pull_done(self, ok, name):
+        if ok:
+            self.pull_log.append(f'<span style="color:#4ade80;">[OK] {name} is ready!</span>')
+            self.refresh_installed_models()
+        else:
+            self.pull_log.append(
+                f'<span style="color:#f87171;">[ERR] Failed to pull <b>{name}</b>. '
+                f'Verify the name at ollama.com/library</span>')
+        self.pull_progress.setVisible(False)
+
+    # ── Logic: Chat ───────────────────────────────────────────────────────────
+    def send_chat(self):
+        model = self.chat_model_combo.currentText(); prompt = self.chat_input.text().strip()
+        if not model or not prompt: return
+        self.chat_input.clear(); self.btn_send.setEnabled(False)
+        label = "Streaming" if self.stream_cb.isChecked() else "Generating"
+        self.chat_status.setText(f"{label}  ·  {model}…")
+
+        self.chat_display.append(
+            f'<br><span style="color:#38bdf8; font-weight:bold;">YOU</span><br>'
+            f'<span style="color:#e2e8f0;">{prompt}</span><br><br>'
+            f'<span style="color:#4ade80; font-weight:bold;">ASSISTANT</span><br>'
+        )
+        self.chat_history.append({"role":"user","content":prompt})
+        self._current_response = ""
+
+        self.chat_thread = StreamChatThread(model, list(self.chat_history))
+        self.chat_thread.token.connect(self._stream_token)
+        self.chat_thread.done.connect(self._chat_done)
+        self.chat_thread.error.connect(self._chat_error)
+        self.chat_thread.start()
+
+    def _stream_token(self, tok):
+        self._current_response += tok
+        cursor = self.chat_display.textCursor(); cursor.movePosition(QTextCursor.End)
+        cursor.insertText(tok); self.chat_display.setTextCursor(cursor); self.chat_display.ensureCursorVisible()
+
+    def _chat_done(self):
+        self.btn_send.setEnabled(True); self.chat_status.setText("Done.")
+        self.chat_display.append("")
+        self.chat_history.append({"role":"assistant","content":self._current_response})
+
+    def _chat_error(self, err):
+        self.chat_display.append(
+            f'<br><span style="color:#f87171;">[ERR] {err}</span>'
+            f'<br><span style="color:#475569;">Is Ollama running?  Run:  ollama serve</span>'
+        )
+        self.btn_send.setEnabled(True); self.chat_status.setText("Error.")
+
+    def clear_chat(self):
+        self.chat_display.clear(); self.chat_history = []; self.chat_status.setText("Chat cleared.")
+
+    # ── Logic: API ────────────────────────────────────────────────────────────
+    def start_api_server(self):
+        port = self.port_spin.value()
+        try:
+            self.api_server = HTTPServer(("0.0.0.0", port), OllamaAPIHandler)
+            threading.Thread(target=self.api_server.serve_forever, daemon=True).start()
+            self.api_status_lbl.setText(f"● RUNNING  :  {port}")
+            self.api_status_lbl.setStyleSheet("color:#4ade80; font-family:'Courier New'; font-size:12px;")
+            self.btn_start_api.setEnabled(False); self.btn_stop_api.setEnabled(True); self.port_spin.setEnabled(False)
+            self._api_log(f'<span style="color:#4ade80;">[START] Listening  0.0.0.0:{port}  ·  LAN  http://{LAN_IP}:{port}</span>')
+        except Exception as e:
+            self._api_log(f'<span style="color:#f87171;">[ERR] {e}</span>')
+
+    def stop_api_server(self):
+        if self.api_server:
+            threading.Thread(target=self.api_server.shutdown, daemon=True).start(); self.api_server = None
+        self.api_status_lbl.setText("● STOPPED"); self.api_status_lbl.setStyleSheet("color:#f87171; font-family:'Courier New'; font-size:12px;")
+        self.btn_start_api.setEnabled(True); self.btn_stop_api.setEnabled(False); self.port_spin.setEnabled(True)
+        self._api_log('<span style="color:#fbbf24;">[STOP] Server stopped.</span>')
+
+    def _api_log(self, html):
+        self.api_log_box.append(f'<span style="color:#475569;">[{self._ts()}]</span> {html}')
+        self.api_log_box.moveCursor(QTextCursor.End)
+
+    def closeEvent(self, event):
+        self.stop_api_server(); event.accept()
+
+
+# ─── Entry Point ──────────────────────────────────────────────────────────────
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    app.setStyleSheet(STYLESHEET)
+    win = OllamaManager()
+    win.show()
+    sys.exit(app.exec_())
